@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Indian Food Log</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: #fafafa; color: #111; max-width: 480px; margin: 0 auto; padding: 20px; }
+  h1 { font-size: 20px; font-weight: 700; margin-bottom: 16px; }
+  .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+  .row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .big { font-size: 26px; font-weight: 700; }
+  .small { font-size: 13px; color: #666; }
+  .bar { height: 6px; background: #eee; border-radius: 3px; overflow: hidden; margin-bottom: 14px; }
+  .bar > div { height: 100%; background: #111; width: 0; transition: width .3s ease; }
+  .input-row { display: flex; gap: 8px; }
+  input[type=text], input[type=number], input[type=password] { flex: 1; padding: 12px; border: 1px solid #ddd; border-radius: 10px; font-size: 16px; width: 100%; }
+  button { padding: 12px 16px; border: none; border-radius: 10px; background: #111; color: #fff; font-size: 15px; font-weight: 500; cursor: pointer; }
+  button:active { opacity: 0.85; }
+  button:disabled { background: #888; cursor: not-allowed; }
+  button.mic.on { background: #d33; }
+  label { display: block; font-size: 13px; color: #666; margin: 12px 0 4px; }
+  .entry { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid #f0f0f0; font-size: 15px; }
+  .entry:last-child { border-bottom: none; }
+  .pick { padding: 12px; border: 1px solid #ddd; border-radius: 8px; margin-top: 8px; cursor: pointer; font-size: 14px; background: #fafafa; }
+  .pick:hover { background: #f0f0f0; }
+  .msg { font-size: 13px; color: #b00; margin-top: 8px; min-height: 16px; }
+  .link-btn { background: none; border: none; color: #666; padding: 0; font-size: 13px; text-decoration: underline; cursor: pointer; }
+  .del { background: none; border: none; color: #aaa; padding: 4px 8px; font-size: 16px; cursor: pointer; }
+  .del:hover { color: #d33; }
+  .hidden { display: none; }
+  .footer-links { display: flex; justify-content: space-between; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+<!-- ONBOARDING & SETTINGS -->
+<div id="onboard" class="hidden">
+  <h1>Set up your profile</h1>
+  <div class="card">
+    <label>Body Weight (kg)</label>
+    <input type="number" id="ob-weight" inputmode="decimal" placeholder="e.g. 70">
+    
+    <label>Daily Calorie Target (kcal)</label>
+    <input type="number" id="ob-cal" inputmode="numeric" placeholder="e.g. 2000">
+    
+    <label>Daily Protein Goal (grams)</label>
+    <input type="number" id="ob-protein" inputmode="numeric" placeholder="e.g. 120">
+
+    <label>Gemini API Key (Optional)</label>
+    <input type="password" id="ob-gemini" placeholder="AIzaSy...">
+    <span class="small" style="margin-top: 4px; display: block;">Used as fallback for foods not in the offline database.</span>
+
+    <button style="margin-top:16px;width:100%" onclick="saveProfile()">Save Settings</button>
+    <div class="msg" id="ob-msg"></div>
+  </div>
+</div>
+
+<!-- MAIN SCREEN -->
+<div id="main" class="hidden">
+  <h1>Today's Intake</h1>
+  
+  <div class="card">
+    <div class="row">
+      <span class="big" id="cal-now">0 kcal</span>
+      <span class="small" id="cal-goal"></span>
+    </div>
+    <div class="bar"><div id="cal-bar"></div></div>
+
+    <div class="row">
+      <span class="big" id="pro-now">0 g</span>
+      <span class="small" id="pro-goal"></span>
+    </div>
+    <div class="bar"><div id="pro-bar"></div></div>
+
+    <div class="footer-links">
+      <button class="link-btn" onclick="editProfile()">Settings</button>
+      <button class="link-btn" onclick="exportData()">Backup Logs (JSON)</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="input-row">
+      <input type="text" id="q" placeholder="e.g. 2 rotis and dal" autocomplete="off">
+      <button class="mic" id="mic" onclick="toggleMic()">Mic</button>
+    </div>
+    <button style="margin-top:10px;width:100%" id="add-btn" onclick="submitText()">Add to Log</button>
+    <div id="picks"></div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <div class="card" id="log"></div>
+</div>
+
+<script>
+// ---------- BASE DATABASE ----------
+const BASE_FOODS = [
+  ["roti", ["chapati","phulka","rotis","chapatis","rooti"], "1 medium (40g)", 40, 120, 3.5],
+  ["paratha plain", ["parantha","parathas","plain paratha"], "1 medium", 80, 260, 5],
+  ["aloo paratha", ["potato paratha","aloo parantha"], "1 medium", 120, 300, 6],
+  ["naan", ["naan bread","nan"], "1 piece", 90, 260, 8],
+  ["puri", ["poori","puris"], "1 piece", 30, 100, 2],
+  ["white rice cooked", ["rice","chawal","steamed rice","plain rice"], "1 cup (160g)", 160, 205, 4.2],
+  ["brown rice cooked", ["brown rice"], "1 cup (160g)", 160, 215, 5],
+  ["jeera rice", ["cumin rice"], "1 cup", 170, 260, 4.5],
+  ["biryani chicken", ["chicken biryani","biriyani","biryani"], "1 plate (300g)", 300, 490, 24],
+  ["veg biryani", ["vegetable biryani"], "1 plate (300g)", 300, 400, 9],
+  ["khichdi", ["khichri","dal khichdi"], "1 cup", 200, 230, 8],
+  ["dal", ["daal","dal tadka","toor dal","arhar dal","lentil curry","dhal"], "1 katori (150g)", 150, 150, 8],
+  ["moong dal", ["mung dal","moong"], "1 katori (150g)", 150, 135, 9],
+  ["masoor dal", ["red lentils"], "1 katori (150g)", 150, 140, 9],
+  ["chana masala", ["chole","chickpea curry","chhole"], "1 katori (150g)", 150, 210, 9],
+  ["rajma", ["rajma masala","kidney bean curry"], "1 katori (150g)", 150, 190, 9],
+  ["sambar", ["sambhar"], "1 katori (150g)", 150, 100, 5],
+  ["rasam", ["charu"], "1 katori (150g)", 150, 50, 2],
+  ["idli", ["idly","idlis"], "1 piece (40g)", 40, 58, 2],
+  ["plain dosa", ["dosa","dosai","dosas"], "1 medium", 90, 135, 3],
+  ["masala dosa", ["masala dosai"], "1 medium", 180, 280, 6],
+  ["uttapam", ["uthappam","oothappam"], "1 medium", 120, 190, 5],
+  ["vada", ["medu vada","vadai","vadas"], "1 piece", 50, 140, 4],
+  ["upma", ["uppuma","rava upma"], "1 cup", 200, 250, 6],
+  ["poha", ["aval","flattened rice"], "1 cup", 150, 250, 5],
+  ["paneer", ["cottage cheese","paneer cubes"], "100g", 100, 265, 18],
+  ["paneer butter masala", ["paneer makhani","butter paneer"], "1 katori (150g)", 150, 320, 12],
+  ["palak paneer", ["spinach paneer"], "1 katori (150g)", 150, 250, 12],
+  ["butter chicken", ["murgh makhani"], "1 katori (150g)", 150, 300, 20],
+  ["chicken curry", ["chicken gravy","murgh curry"], "1 katori (150g)", 150, 240, 20],
+  ["tandoori chicken", ["chicken tandoori"], "1 leg piece (150g)", 150, 260, 30],
+  ["egg boiled", ["boiled egg","egg","eggs","anda"], "1 large", 50, 78, 6.3],
+  ["omelette", ["omelet","egg omelette"], "2 eggs", 110, 200, 13],
+  ["egg curry", ["anda curry","egg masala"], "2 eggs with gravy", 200, 280, 14],
+  ["fish curry", ["machli curry","meen curry"], "1 katori (150g)", 150, 220, 22],
+  ["mutton curry", ["lamb curry","mutton masala"], "1 katori (150g)", 150, 330, 22],
+  ["aloo gobi", ["aloo gobhi","potato cauliflower"], "1 katori (150g)", 150, 140, 3.5],
+  ["bhindi masala", ["bhindi","okra","ladyfinger"], "1 katori (150g)", 150, 130, 3],
+  ["baingan bharta", ["brinjal","eggplant curry"], "1 katori (150g)", 150, 140, 3],
+  ["mixed veg curry", ["sabzi","vegetable curry","mix veg"], "1 katori (150g)", 150, 130, 3],
+  ["curd", ["dahi","yogurt","yoghurt","plain curd"], "1 katori (100g)", 100, 60, 3.5],
+  ["raita", ["boondi raita","cucumber raita"], "1 katori (100g)", 100, 70, 3],
+  ["buttermilk", ["chaas","lassi salted","moru"], "1 glass (250ml)", 250, 40, 2],
+  ["sweet lassi", ["lassi"], "1 glass (250ml)", 250, 180, 6],
+  ["milk", ["doodh","full fat milk","cow milk"], "1 glass (250ml)", 250, 150, 8],
+  ["tea with milk and sugar", ["chai","tea","milk tea"], "1 cup", 150, 60, 1.5],
+  ["coffee with milk and sugar", ["coffee","filter coffee"], "1 cup", 150, 70, 2],
+  ["samosa", ["samosas"], "1 piece", 80, 260, 4],
+  ["pakora", ["pakoda","bhajiya","bajji","pakoras"], "4 pieces", 80, 220, 5],
+  ["vada pav", ["wada pav"], "1 piece", 130, 290, 7],
+  ["pav bhaji", ["pao bhaji"], "1 plate", 250, 400, 9],
+  ["dhokla", ["khaman"], "2 pieces (60g)", 60, 100, 4],
+  ["thepla", ["methi thepla"], "1 piece", 50, 120, 3],
+  ["banana", ["kela"], "1 medium", 118, 105, 1.3],
+  ["apple", ["seb"], "1 medium", 180, 95, 0.5],
+  ["mango", ["aam"], "1 cup sliced", 165, 100, 1.4],
+  ["papaya", ["papita"], "1 cup", 140, 60, 0.7],
+  ["orange", ["santra","narangi"], "1 medium", 130, 62, 1.2],
+  ["peanuts roasted", ["peanuts","moongphali","groundnuts"], "1 handful (30g)", 30, 170, 7.5],
+  ["almonds", ["badam"], "10 pieces (12g)", 12, 70, 2.5],
+  ["gulab jamun", ["gulab jamuns"], "1 piece", 50, 150, 2],
+  ["jalebi", ["jilebi"], "2 pieces", 50, 200, 1],
+  ["kheer", ["payasam","rice pudding"], "1 katori (100g)", 100, 180, 4],
+  ["ladoo", ["laddu","besan ladoo","laddoo"], "1 piece", 40, 180, 3],
+  ["ghee", ["clarified butter"], "1 teaspoon", 5, 45, 0],
+  ["oats cooked", ["oats","oatmeal","porridge"], "1 cup", 240, 160, 6],
+  ["bread slice", ["bread","white bread","toast"], "1 slice", 28, 75, 2.5],
+  ["whey protein", ["protein shake","whey","protein powder"], "1 scoop (30g)", 30, 120, 24],
+  ["soya chunks", ["soy chunks","nutrela","meal maker"], "30g dry", 30, 100, 15]
+];
+
+const NUMBER_WORDS = { 
+  a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, 
+  six: 6, seven: 7, eight: 8, nine: 9, ten: 10, half: 0.5, quarter: 0.25, 
+  ek: 1, do: 2, teen: 3, char: 4, paanch: 5, aadha: 0.5, dedh: 1.5, dhai: 2.5 
+};
+const FILLER = new Set([
+  "i","had","ate","eat","eaten","with","some","of","the","for","breakfast",
+  "lunch","dinner","snack","and","plus","also","then","my","today","just",
+  "about","around","piece","pieces","plate","plates","bowl","bowls","cup",
+  "cups","katori","glass","glasses","serving","servings","slice","slices"
+]);
+
+// ---------- STORAGE & STATE ----------
+const $ = id => document.getElementById(id);
+const todayKey = () => new Date().toISOString().slice(0,10);
+const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const save = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+
+let profile = load("profile", null);
+let logs = load("logs", {});
+let customFoods = load("custom_foods", []);
+
+function getAllFoods() {
+  return [...BASE_FOODS, ...customFoods];
+}
+
+// ---------- PROFILE MANAGEMENT ----------
+function saveProfile() {
+  const w = parseFloat($("ob-weight").value);
+  const c = parseInt($("ob-cal").value);
+  const p = parseInt($("ob-protein").value);
+  const gemini = $("ob-gemini").value.trim();
+
+  if (!w || !c || !p) { $("ob-msg").textContent = "Please fill weight, calories, and protein."; return; }
+  profile = { weight: w, calories: c, protein: p, geminiKey: gemini };
+  save("profile", profile);
+  show();
+}
+
+function editProfile() {
+  $("ob-weight").value = profile.weight;
+  $("ob-cal").value = profile.calories;
+  $("ob-protein").value = profile.protein;
+  $("ob-gemini").value = profile.geminiKey || "";
+  $("main").classList.add("hidden");
+  $("onboard").classList.remove("hidden");
+}
+
+function exportData() {
+  const blob = new Blob([JSON.stringify({ profile, logs, customFoods }, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `food-log-${todayKey()}.json`;
+  a.click();
+}
+
+// ---------- PARSING AND SEARCH ----------
+function normalize(s) {
+  return s.toLowerCase()
+    .replace(/one and a half|1 and a half/g, "1.5")
+    .replace(/two and a half|2 and a half/g, "2.5")
+    .replace(/[^a-z0-9.\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parsePhrase(raw) {
+  const text = normalize(raw);
+  const parts = text.split(/\band\b|\bplus\b|\bwith\b|,|\bthen\b/).map(s => s.trim()).filter(Boolean);
+  return parts.map(part => {
+    const tokens = part.split(" ");
+    let qty = 1;
+    const rest = [];
+    for (const t of tokens) {
+      if (/^\d+(\.\d+)?$/.test(t)) qty = parseFloat(t);
+      else if (NUMBER_WORDS[t] !== undefined) qty = NUMBER_WORDS[t];
+      else if (!FILLER.has(t)) rest.push(t);
+    }
+    return { qty, query: rest.join(" ") };
+  }).filter(p => p.query);
+}
+
+function lev(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n; if (!n) return m;
+  const d = Array.from({length: m+1}, (_, i) => [i, ...Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      d[i][j] = Math.min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1] + (a[i-1] === b[j-1] ? 0 : 1));
+  return d[m][n];
+}
+
+function similarity(a, b) {
+  if (a === b) return 1;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen <= 3 && a !== b) return 0;
+  return 1 - lev(a, b) / maxLen;
+}
+
+function scoreFood(query, food) {
+  const names = [food[0], ...food[1]];
+  let best = 0;
+  const qTokens = query.split(" ");
+  for (const name of names) {
+    let s = similarity(query, name);
+    if (name.includes(query) || query.includes(name)) s = Math.max(s, 0.85);
+    const nTokens = name.split(" ");
+    let matched = 0;
+    for (const qt of qTokens) {
+      let bestTok = 0;
+      for (const nt of nTokens) bestTok = Math.max(bestTok, similarity(qt, nt));
+      if (bestTok >= 0.75) matched += bestTok;
+    }
+    const overlap = matched / Math.max(qTokens.length, nTokens.length);
+    best = Math.max(best, s, overlap);
+  }
+  return best;
+}
+
+function search(query) {
+  return getAllFoods().map(f => ({ food: f, score: scoreFood(query, f) }))
+    .filter(r => r.score >= 0.55)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 4);
+}
+
+// ---------- GEMINI API FALLBACK ----------
+async function fetchGeminiNutrition(foodName) {
+  if (!profile.geminiKey) return null;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${profile.geminiKey}`;
+  const prompt = `Return approximate nutrition for 1 typical standard serving of "${foodName}". 
+Respond ONLY in JSON with this exact schema:
+{
+  "name": "standard short name",
+  "serving": "description of serving (e.g. 1 bowl, 1 piece)",
+  "grams": estimated total grams as number,
+  "calories": estimated kcal as integer,
+  "protein": estimated protein grams as number
+}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { response_mime_type: "application/json" }
+    })
+  });
+
+  if (!res.ok) throw new Error("Gemini API error");
+  const data = await res.json();
+  const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
+  
+  const newFood = [
+    parsed.name.toLowerCase(),
+    [foodName.toLowerCase()],
+    parsed.serving,
+    Number(parsed.grams) || 100,
+    Number(parsed.calories) || 0,
+    Number(parsed.protein) || 0
+  ];
+
+  customFoods.push(newFood);
+  save("custom_foods", customFoods);
+
+  return newFood;
+}
+
+// ---------- LOGGING & QUEUE ----------
+function addEntry(food, qty) {
+  const day = todayKey();
+  logs[day] = logs[day] || [];
+  logs[day].push({
+    name: food[0], serving: food[2], qty,
+    cal: Math.round(food[4] * qty),
+    pro: Math.round(food[5] * qty * 10) / 10,
+    t: Date.now()
+  });
+  save("logs", logs);
+  render();
+}
+
+let pending = [];
+
+function submitText() {
+  const raw = $("q").value;
+  $("msg").textContent = "";
+  $("picks").innerHTML = "";
+  if (!raw.trim()) return;
+  pending = parsePhrase(raw);
+  if (!pending.length) { $("msg").textContent = "Could not understand that. Try again."; return; }
+  $("q").value = "";
+  processNext();
+}
+
+async function processNext() {
+  $("picks").innerHTML = "";
+  while (pending.length) {
+    const { qty, query } = pending[0];
+    const results = search(query);
+
+    if (!results.length) {
+      if (profile.geminiKey) {
+        $("msg").textContent = `Looking up "${query}" with Gemini...`;
+        $("add-btn").disabled = true;
+        try {
+          const aiFood = await fetchGeminiNutrition(query);
+          $("add-btn").disabled = false;
+          $("msg").textContent = "";
+          if (aiFood) {
+            addEntry(aiFood, qty);
+            pending.shift();
+            continue;
+          }
+        } catch (err) {
+          $("add-btn").disabled = false;
+          $("msg").textContent = `Failed lookup for "${query}". Check key or network.`;
+        }
+      } else {
+        $("msg").textContent = `No match for "${query}". (Add Gemini API key in settings to auto-fetch)`;
+      }
+      pending.shift();
+      continue;
+    }
+
+    const top = results[0], second = results[1];
+    const clear = top.score >= 0.9 || !second || (top.score - second.score) >= 0.15;
+    if (clear) {
+      addEntry(top.food, qty);
+      pending.shift();
+      continue;
+    }
+
+    const box = $("picks");
+    const label = document.createElement("div");
+    label.className = "small";
+    label.style.marginTop = "10px";
+    label.textContent = `Which one for "${query}"?`;
+    box.appendChild(label);
+    results.forEach(r => {
+      const d = document.createElement("div");
+      d.className = "pick";
+      d.textContent = `${r.food[0]} (${r.food[2]}) - ${r.food[4]} kcal, ${r.food[5]} g protein`;
+      d.onclick = () => { addEntry(r.food, qty); pending.shift(); processNext(); };
+      box.appendChild(d);
+    });
+    return;
+  }
+}
+
+// ---------- RENDER ----------
+function render() {
+  const entries = logs[todayKey()] || [];
+  const cal = entries.reduce((s, e) => s + e.cal, 0);
+  const pro = Math.round(entries.reduce((s, e) => s + e.pro, 0) * 10) / 10;
+  
+  $("cal-now").textContent = cal + " kcal";
+  $("cal-goal").textContent = "of " + profile.calories;
+  $("pro-now").textContent = pro + " g";
+  $("pro-goal").textContent = "of " + profile.protein + " g protein";
+  $("cal-bar").style.width = Math.min(100, (cal / profile.calories) * 100) + "%";
+  $("pro-bar").style.width = Math.min(100, (pro / profile.protein) * 100) + "%";
+
+  const log = $("log");
+  if (!entries.length) { log.innerHTML = '<div class="small">Nothing logged today yet.</div>'; return; }
+  log.innerHTML = "";
+  entries.slice().reverse().forEach((e, idxRev) => {
+    const idx = entries.length - 1 - idxRev;
+    const row = document.createElement("div");
+    row.className = "entry";
+    const left = document.createElement("span");
+    left.textContent = `${e.qty !== 1 ? e.qty + " x " : ""}${e.name}`;
+    const right = document.createElement("span");
+    right.textContent = `${e.cal} kcal, ${e.pro} g `;
+    const del = document.createElement("button");
+    del.className = "del";
+    del.setAttribute("aria-label", "Delete entry");
+    del.innerHTML = "&times;";
+    del.onclick = () => { logs[todayKey()].splice(idx, 1); save("logs", logs); render(); };
+    right.appendChild(del);
+    row.appendChild(left);
+    row.appendChild(right);
+    log.appendChild(row);
+  });
+}
+
+function show() {
+  if (!profile) {
+    $("onboard").classList.remove("hidden");
+    $("main").classList.add("hidden");
+  } else {
+    $("onboard").classList.add("hidden");
+    $("main").classList.remove("hidden");
+    render();
+  }
+}
+
+// ---------- VOICE INPUT ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, listening = false;
+function toggleMic() {
+  if (!SR) { $("msg").textContent = "Voice input is not supported in this browser. Try Chrome."; return; }
+  if (listening) { rec.stop(); return; }
+  rec = new SR();
+  rec.lang = "en-IN";
+  rec.interimResults = false;
+  rec.onstart = () => { listening = true; $("mic").classList.add("on"); $("mic").textContent = "Listening..."; };
+  rec.onend = () => { listening = false; $("mic").classList.remove("on"); $("mic").textContent = "Mic"; };
+  rec.onerror = e => { $("msg").textContent = "Voice error: " + e.error; };
+  rec.onresult = e => { $("q").value = e.results[0][0].transcript; submitText(); };
+  rec.start();
+}
+
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") submitText(); });
+
+show();
+</script>
+</body>
+</html>

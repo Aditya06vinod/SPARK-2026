@@ -1,0 +1,6 @@
+{
+  "name": "NutriPulse - Minimalist Calorie & Food Tracker",
+  "description": "Professional minimalist daily calorie and macro tracker with dark mode, natural language food parsing, and goal dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
